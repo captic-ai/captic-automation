@@ -83,6 +83,7 @@ class Settings:
     agent_run_poll_path: str | None = None
     agent_run_timeout_seconds: float = 120.0
     agent_expected_run_statuses: tuple[int, ...] = (200, 201, 202)
+    api_health_strict: bool = False
 
 
 SAFE_ENVIRONMENT_KEYWORDS = {
@@ -305,6 +306,7 @@ def _base_settings() -> Settings:
             "AGENT_EXPECTED_RUN_STATUSES",
             (200, 201, 202),
         ),
+        api_health_strict=_read_bool("API_HEALTH_STRICT", False),
     )
 
 
@@ -349,4 +351,5 @@ def get_settings(
         agent_run_poll_path=base.agent_run_poll_path,
         agent_run_timeout_seconds=base.agent_run_timeout_seconds,
         agent_expected_run_statuses=base.agent_expected_run_statuses,
+        api_health_strict=base.api_health_strict,
     )
