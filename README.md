@@ -52,8 +52,41 @@ pytest -m "prod_safe and ui"
 pytest -m "prod_safe and api"
 pytest -m "smoke and ui"
 pytest -m "smoke and api"
+pytest -m "agent and read_only"          # prod-safe agent availability checks
+pytest -m "business_critical"            # revenue/trust-critical journeys
+pytest -m "negative or permissions"      # rejection + access-control checks
 pytest --junitxml=test-results/junit.xml --html=reports/pytest-report.html --self-contained-html
 ```
+
+## Test categories (markers)
+
+Business-facing markers layered on top of the original `smoke/ui/api/unit`:
+
+- `read_only`: performs no writes; safe against any environment including prod.
+- `business_critical`: a journey that, if broken, directly hurts users/revenue/trust.
+- `agent`: exercises Captic agent behavior (list, detail, run, output, lifecycle).
+- `contract`: validates API request/response shapes the frontend depends on.
+- `negative`: validates clean rejection of bad/missing input (no 5xx, no silent 2xx).
+- `permissions`: validates authz/access-control boundaries.
+- `data_validation`: validates correctness/integrity of returned data.
+- `resilience`: validates consistent responsiveness (latency budgets, repeated probes).
+
+Safety rules still hold: in the `prod_safe` profile only `unit` + `prod_safe`
+tests run, and any `destructive` test is blocked in prod regardless of markers.
+Agent *run* tests are marked `destructive`, so they only ever run in
+`staging_full` with `ENABLE_DESTRUCTIVE_TESTS=true`.
+
+## Agent coverage config
+
+Set these once the real Captic agent routes are confirmed (see `.env.example`):
+
+- `AGENT_API_LIST_PATH` / `AGENT_API_DETAIL_PATH`: read-only, prod-safe.
+- `AGENT_API_RUN_PATH` / `AGENT_RUN_POLL_PATH`: data-changing, staging-only.
+- `AGENT_UI_PATH`: agent surface for UI journeys.
+- `AGENT_RUN_TIMEOUT_SECONDS`, `AGENT_EXPECTED_RUN_STATUSES`: run tuning.
+
+Until these are set (and API login is wired), agent tests skip cleanly rather
+than fail. See `docs/TEST_STRATEGY.md` and `docs/COVERAGE_MATRIX.md`.
 
 ## Environment variables
 

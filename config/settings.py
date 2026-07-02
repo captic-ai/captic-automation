@@ -74,6 +74,15 @@ class Settings:
     api_login_expected_statuses: tuple[int, ...]
     api_login_success_field: str | None
     api_login_extra_payload: dict[str, object]
+    # --- Agent-specific config (added for Captic agent coverage) ---
+    # All optional so account/agent tests skip cleanly until wired to real routes.
+    agent_ui_path: str | None = None
+    agent_api_list_path: str | None = None
+    agent_api_detail_path: str | None = None
+    agent_api_run_path: str | None = None
+    agent_run_poll_path: str | None = None
+    agent_run_timeout_seconds: float = 120.0
+    agent_expected_run_statuses: tuple[int, ...] = (200, 201, 202)
 
 
 SAFE_ENVIRONMENT_KEYWORDS = {
@@ -232,6 +241,27 @@ def is_api_login_ready(settings: "Settings") -> bool:
     return all(required)
 
 
+def is_agent_api_read_ready(settings: "Settings") -> bool:
+    """Ready to run read-only agent API checks (list/detail).
+
+    Requires an authenticated API session, so it also depends on API login.
+    """
+    return bool(
+        settings.api_base_url
+        and settings.agent_api_list_path
+        and is_api_login_ready(settings)
+    )
+
+
+def is_agent_run_ready(settings: "Settings") -> bool:
+    """Ready to run data-changing agent-run checks (staging_full only)."""
+    return bool(
+        settings.api_base_url
+        and settings.agent_api_run_path
+        and is_api_login_ready(settings)
+    )
+
+
 @lru_cache(maxsize=1)
 def _base_settings() -> Settings:
     target_env = _read_target_env()
@@ -265,6 +295,16 @@ def _base_settings() -> Settings:
         ),
         api_login_success_field=os.getenv("API_LOGIN_SUCCESS_FIELD"),
         api_login_extra_payload=_read_json_object("API_LOGIN_EXTRA_PAYLOAD"),
+        agent_ui_path=_normalize_path(os.getenv("AGENT_UI_PATH")),
+        agent_api_list_path=_normalize_path(os.getenv("AGENT_API_LIST_PATH")),
+        agent_api_detail_path=_normalize_path(os.getenv("AGENT_API_DETAIL_PATH")),
+        agent_api_run_path=_normalize_path(os.getenv("AGENT_API_RUN_PATH")),
+        agent_run_poll_path=_normalize_path(os.getenv("AGENT_RUN_POLL_PATH")),
+        agent_run_timeout_seconds=float(os.getenv("AGENT_RUN_TIMEOUT_SECONDS", "120")),
+        agent_expected_run_statuses=_read_csv_ints(
+            "AGENT_EXPECTED_RUN_STATUSES",
+            (200, 201, 202),
+        ),
     )
 
 
@@ -302,4 +342,11 @@ def get_settings(
         api_login_expected_statuses=base.api_login_expected_statuses,
         api_login_success_field=base.api_login_success_field,
         api_login_extra_payload=base.api_login_extra_payload,
+        agent_ui_path=base.agent_ui_path,
+        agent_api_list_path=base.agent_api_list_path,
+        agent_api_detail_path=base.agent_api_detail_path,
+        agent_api_run_path=base.agent_api_run_path,
+        agent_run_poll_path=base.agent_run_poll_path,
+        agent_run_timeout_seconds=base.agent_run_timeout_seconds,
+        agent_expected_run_statuses=base.agent_expected_run_statuses,
     )

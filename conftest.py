@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 
 from clients.api_client import ApiClient
+from clients.agent_client import AgentClient
 from config.settings import (
     Settings,
     get_settings,
+    is_api_login_ready,
     validate_auth_configuration,
     validate_safe_targets,
 )
@@ -48,6 +50,17 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "prod_safe: approved for low-risk production smoke coverage",
     )
+    for marker in (
+        "read_only: performs no writes/mutations - safe against any environment",
+        "business_critical: covers a revenue- or trust-critical business journey",
+        "agent: exercises Captic agent behavior (creation, run, output, lifecycle)",
+        "contract: validates API request/response contracts and schemas",
+        "negative: validates error handling and rejection of bad input",
+        "permissions: validates authz / access-control boundaries",
+        "data_validation: validates data integrity and correctness of returned data",
+        "resilience: validates reliability under latency, retries, or partial failure",
+    ):
+        config.addinivalue_line("markers", marker)
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -133,6 +146,52 @@ def api_login_payload(settings: Settings, test_account: dict[str, str]) -> dict[
     payload[settings.api_login_identifier_field] = test_account["email"]
     payload[settings.api_login_password_field] = test_account["password"]
     return payload
+
+
+@pytest.fixture(scope="session")
+def api_auth_token(
+    api_client: ApiClient,
+    settings: Settings,
+    api_login_payload: dict[str, object],
+) -> str:
+    """Log in the dedicated test account and return a bearer token.
+
+    Skips cleanly until API login is configured. Used by any test that needs an
+    authenticated session (agent reads, permissions checks, business flows).
+    """
+    if not is_api_login_ready(settings):
+        pytest.skip("Authenticated API session requires API login config + test account.")
+    response = api_client.post(settings.api_login_path, json=api_login_payload)
+    if response.status_code not in settings.api_login_expected_statuses:
+        pytest.skip(f"Test-account login did not succeed (status {response.status_code}).")
+
+    token_field = settings.api_login_success_field or "token"
+    try:
+        body = response.json()
+    except ValueError:
+        pytest.skip("Login response was not JSON; cannot extract an auth token.")
+    token = body.get(token_field) if isinstance(body, dict) else None
+    if not token:
+        pytest.skip(
+            f"Login succeeded but no '{token_field}' token was found in the response. "
+            "Set API_LOGIN_SUCCESS_FIELD to the correct token field."
+        )
+    return str(token)
+
+
+@pytest.fixture(scope="session")
+def agent_client(settings: Settings, api_auth_token: str) -> AgentClient:
+    """Authenticated client for Captic agent endpoints (read + run helpers)."""
+    if not settings.api_base_url:
+        pytest.skip("API_BASE_URL is not configured for agent tests.")
+    client = AgentClient(
+        settings.api_base_url,
+        settings=settings,
+        auth_token=api_auth_token,
+        timeout_seconds=settings.api_timeout_seconds,
+    )
+    yield client
+    client.close()
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

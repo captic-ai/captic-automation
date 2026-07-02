@@ -15,6 +15,22 @@ class RegressionSummary:
     duration_seconds: float
     failed_tests: list[str]
 
+    @property
+    def executed(self) -> int:
+        """Tests that actually ran (excludes skipped)."""
+        return max(self.total - self.skipped, 0)
+
+    @property
+    def pass_rate(self) -> float:
+        """Pass rate over executed tests, as a 0-100 percentage."""
+        if self.executed == 0:
+            return 100.0
+        return round(self.passed / self.executed * 100, 1)
+
+    @property
+    def is_green(self) -> bool:
+        return self.failed == 0 and self.errors == 0
+
 
 def collect_summary(junit_xml_path: str | Path) -> RegressionSummary:
     xml_path = Path(junit_xml_path)
