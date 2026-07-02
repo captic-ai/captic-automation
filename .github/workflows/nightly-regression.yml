@@ -1,0 +1,81 @@
+name: Nightly Regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *"
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TARGET_ENV: ${{ vars.TARGET_ENV || 'prod' }}
+      TEST_ENVIRONMENT: ${{ vars.TEST_ENVIRONMENT || vars.TARGET_ENV || 'prod' }}
+      PROD_UI_BASE_URL: ${{ vars.PROD_UI_BASE_URL }}
+      PROD_API_BASE_URL: ${{ vars.PROD_API_BASE_URL }}
+      STAGING_UI_BASE_URL: ${{ vars.STAGING_UI_BASE_URL }}
+      STAGING_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+      API_HEALTH_PATH: ${{ vars.API_HEALTH_PATH || '/health' }}
+      ENABLE_DESTRUCTIVE_TESTS: ${{ vars.ENABLE_DESTRUCTIVE_TESTS || 'false' }}
+      ALLOW_UNSAFE_TARGETS: "false"
+      TEST_USER_EMAIL: ${{ vars.TEST_USER_EMAIL }}
+      TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+      UI_LOGIN_PATH: ${{ vars.UI_LOGIN_PATH }}
+      UI_LOGIN_EMAIL_SELECTOR: ${{ vars.UI_LOGIN_EMAIL_SELECTOR }}
+      UI_LOGIN_PASSWORD_SELECTOR: ${{ vars.UI_LOGIN_PASSWORD_SELECTOR }}
+      UI_LOGIN_SUBMIT_SELECTOR: ${{ vars.UI_LOGIN_SUBMIT_SELECTOR }}
+      UI_LOGIN_SUCCESS_SELECTOR: ${{ vars.UI_LOGIN_SUCCESS_SELECTOR }}
+      API_LOGIN_PATH: ${{ vars.API_LOGIN_PATH }}
+      API_LOGIN_IDENTIFIER_FIELD: ${{ vars.API_LOGIN_IDENTIFIER_FIELD }}
+      API_LOGIN_PASSWORD_FIELD: ${{ vars.API_LOGIN_PASSWORD_FIELD }}
+      API_LOGIN_EXPECTED_STATUSES: ${{ vars.API_LOGIN_EXPECTED_STATUSES }}
+      API_LOGIN_SUCCESS_FIELD: ${{ vars.API_LOGIN_SUCCESS_FIELD }}
+      API_LOGIN_EXTRA_PAYLOAD: ${{ vars.API_LOGIN_EXTRA_PAYLOAD }}
+      GOOGLE_CHAT_WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run regression suite
+        id: regression
+        continue-on-error: true
+        run: |
+          mkdir -p reports test-results
+          pytest \
+            --junitxml=test-results/junit.xml \
+            --html=reports/pytest-report.html \
+            --self-contained-html
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-artifacts
+          path: |
+            reports/
+            test-results/
+
+      - name: Send Google Chat summary
+        if: always()
+        run: |
+          python scripts/send_google_chat_summary.py \
+            --junit-xml test-results/junit.xml \
+            --suite-name nightly-regression \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Mark workflow failed when tests fail
+        if: steps.regression.outcome != 'success'
+        run: exit 1
