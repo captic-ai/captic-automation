@@ -33,13 +33,14 @@ jobs:
       API_LOGIN_EXPECTED_STATUSES: ${{ vars.API_LOGIN_EXPECTED_STATUSES }}
       API_LOGIN_SUCCESS_FIELD: ${{ vars.API_LOGIN_SUCCESS_FIELD }}
       API_LOGIN_EXTRA_PAYLOAD: ${{ vars.API_LOGIN_EXTRA_PAYLOAD }}
-      AGENT_UI_PATH: ${{ vars.AGENT_UI_PATH }}
-      AGENT_API_LIST_PATH: ${{ vars.AGENT_API_LIST_PATH }}
-      AGENT_API_DETAIL_PATH: ${{ vars.AGENT_API_DETAIL_PATH }}
-      AGENT_API_RUN_PATH: ${{ vars.AGENT_API_RUN_PATH }}
-      AGENT_RUN_POLL_PATH: ${{ vars.AGENT_RUN_POLL_PATH }}
-      AGENT_RUN_TIMEOUT_SECONDS: ${{ vars.AGENT_RUN_TIMEOUT_SECONDS || '120' }}
-      AGENT_EXPECTED_RUN_STATUSES: ${{ vars.AGENT_EXPECTED_RUN_STATUSES || '200,201,202' }}
+      # Captic Agent real contract
+      FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+      AGENT_HEALTH_PATH: ${{ vars.AGENT_HEALTH_PATH || '/' }}
+      AGENT_CHAT_PATH: ${{ vars.AGENT_CHAT_PATH || '/chat' }}
+      AGENT_MODELS_PATH: ${{ vars.AGENT_MODELS_PATH || '/models' }}
+      AGENT_HISTORY_PATH: ${{ vars.AGENT_HISTORY_PATH || '/history' }}
+      AGENT_TEST_OFFER_ID: ${{ vars.AGENT_TEST_OFFER_ID || 'automation-smoke-offer' }}
+      AGENT_E2E_ENABLED: ${{ vars.AGENT_E2E_ENABLED || 'false' }}
       GOOGLE_CHAT_WEBHOOK_URL: ${{ secrets.GOOGLE_CHAT_WEBHOOK_URL }}
 
     steps:

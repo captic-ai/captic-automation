@@ -27,10 +27,12 @@ we've already found and reported, so the daily report stays meaningful:
 
 | Ticket | Area | Summary | Test | Status |
 |---|---|---|---|---|
-| _(candidate)_ | API / health | `GET /health` returns **403** instead of a public 200 | `test_api_health_route_returns_200` | Unconfirmed — confirm with backend whether health should be public |
-| | | | | |
+| CAP-HEALTH-AUTH | auth / health | `GET /` health check requires a token because `auth.py` `PUBLIC_PATHS` is empty `{}`; the docstring says `GET /` should be public for Cloud Run health checks. | `test_health_root_is_public_and_ok` (xfail) | Found by code review of captic-agent/auth.py. Confirm with backend, then fix by populating PUBLIC_PATHS. Test xpasses when fixed. |
 
 ## Candidate observations (not yet confirmed bugs)
 
-- `/health` returning 403 (above) — could be intentional (protected) or a misconfig.
-  Left as a liveness-tolerant check until confirmed; flip to a `known_bug` once triaged.
+- `MOCK_MODE` is hard-coded `False` in `server.py` with no env toggle, so a deployed
+  instance can't be put into mock mode — every `/chat` test hits the real paid LLM.
+  Worth adding a `MOCK_MODE` env switch so smoke tests can run without LLM cost.
+- The old generic `/health` path returns 403; the real health route is `GET /`.
+  Point `API_HEALTH_PATH=/` (or rely on the agent health test) to avoid confusion.

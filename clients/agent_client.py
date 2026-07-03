@@ -1,7 +1,22 @@
 from __future__ import annotations
 
-import time
-from typing import Any
+"""Client for the Captic Agent API, matching the real server.py contract.
+
+Endpoints (from captic-agent/server.py):
+  GET    /                     health, public, {"status":"ok","version",...}
+  GET    /models              providers/models (auth required)
+  POST   /chat                the chatbot (auth required) — PAID + writes history
+  GET    /history/{offer_id}  user-scoped chat history (auth required)
+  DELETE /history/{offer_id}  clear the caller's history (auth required)
+
+Auth is a Firebase ID token sent as `Authorization: Bearer <token>`.
+
+SAFETY: get_models / get_history / health are read-only. chat() spends real LLM
+credits and writes Firestore history — only call it from tests gated behind
+AGENT_E2E_ENABLED, using a dedicated test offer_id, with clear_history cleanup.
+"""
+
+from typing import Any, Optional
 
 import httpx
 
@@ -10,83 +25,63 @@ from config.settings import Settings
 
 
 class AgentClient(ApiClient):
-    """Authenticated, agent-aware wrapper around the base ApiClient.
-
-    This centralizes how tests talk to Captic agent endpoints so that when the
-    real routes/response shapes are confirmed, they only change in one place.
-
-    SAFETY: `list_agents` / `get_agent` are READ-ONLY and prod-safe. `start_run`
-    is DATA-CHANGING and must only be used by tests marked `destructive` /
-    staging-only. The base ApiClient never runs unless API_BASE_URL is set.
-    """
-
     def __init__(
         self,
         base_url: str,
         *,
         settings: Settings,
-        auth_token: str | None = None,
+        auth_token: Optional[str] = None,
         timeout_seconds: float = 20,
     ) -> None:
         super().__init__(base_url, timeout_seconds=timeout_seconds)
         self.settings = settings
         if auth_token:
-            # Default to Bearer; adjust here if Captic uses a different scheme.
             self._client.headers.update({"Authorization": f"Bearer {auth_token}"})
 
-    # ----- READ-ONLY (prod-safe) ---------------------------------------
+    # ----- READ-ONLY -----------------------------------------------------
 
-    def list_agents(self, **kwargs: Any) -> httpx.Response:
-        path = self.settings.agent_api_list_path
-        if not path:
-            raise ValueError("AGENT_API_LIST_PATH is not configured.")
-        return self.get(path, **kwargs)
+    def health(self, **kwargs: Any) -> httpx.Response:
+        """GET / — intended to be public (Cloud Run health check)."""
+        return self.get(self.settings.agent_health_path or "/", **kwargs)
 
-    def get_agent(self, agent_id: str, **kwargs: Any) -> httpx.Response:
-        template = self.settings.agent_api_detail_path
-        if not template:
-            raise ValueError("AGENT_API_DETAIL_PATH is not configured.")
-        # Supports either an "{id}" template or a base path to append to.
-        path = template.format(id=agent_id) if "{id}" in template else f"{template}/{agent_id}"
-        return self.get(path, **kwargs)
+    def get_models(self, **kwargs: Any) -> httpx.Response:
+        return self.get(self.settings.agent_models_path, **kwargs)
 
-    # ----- DATA-CHANGING (staging_full only) ---------------------------
+    def get_history(self, offer_id: str, **kwargs: Any) -> httpx.Response:
+        return self.get(f"{self.settings.agent_history_path}/{offer_id}", **kwargs)
 
-    def start_run(self, payload: dict[str, Any], **kwargs: Any) -> httpx.Response:
-        """Start an agent run. NEVER call from a prod_safe/read_only test."""
-        path = self.settings.agent_api_run_path
-        if not path:
-            raise ValueError("AGENT_API_RUN_PATH is not configured.")
-        return self.post(path, json=payload, **kwargs)
+    # ----- DATA-CHANGING / PAID -----------------------------------------
 
-    def poll_run(
+    def chat(
         self,
-        run_id: str,
         *,
-        terminal_states: tuple[str, ...] = ("succeeded", "completed", "failed", "error"),
-        state_field: str = "status",
-        interval_seconds: float = 2.0,
+        message: str,
+        trade: dict,
+        offer_id: str,
+        product_name: str = "",
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        **kwargs: Any,
     ) -> httpx.Response:
-        """Poll a run until it reaches a terminal state or the timeout elapses.
+        """POST /chat. Spends LLM credits + writes history. Gate behind e2e opt-in."""
+        payload: dict[str, Any] = {
+            "message": message,
+            "trade": trade,
+            "offer_id": offer_id,
+            "product_name": product_name,
+        }
+        if provider is not None:
+            payload["provider"] = provider
+        if model is not None:
+            payload["model"] = model
+        return self.post(self.settings.agent_chat_path, json=payload, **kwargs)
 
-        Returns the last response. Callers assert on the final state. Read-only
-        against the run resource, but only meaningful after a (data-changing)
-        start_run, so keep it in staging-only paths.
-        """
-        template = self.settings.agent_run_poll_path
-        if not template:
-            raise ValueError("AGENT_RUN_POLL_PATH is not configured.")
-        path = template.format(id=run_id) if "{id}" in template else f"{template}/{run_id}"
+    def chat_raw(self, payload: dict, **kwargs: Any) -> httpx.Response:
+        """POST /chat with an arbitrary payload — for negative/validation tests."""
+        return self.post(self.settings.agent_chat_path, json=payload, **kwargs)
 
-        deadline = time.monotonic() + self.settings.agent_run_timeout_seconds
-        response = self.get(path)
-        while time.monotonic() < deadline:
-            try:
-                state = str(response.json().get(state_field, "")).lower()
-            except (ValueError, AttributeError):
-                state = ""
-            if state in terminal_states:
-                return response
-            time.sleep(interval_seconds)
-            response = self.get(path)
-        return response
+    def clear_history(self, offer_id: str, **kwargs: Any) -> httpx.Response:
+        """DELETE /history/{offer_id} — cleanup after e2e chat tests."""
+        return self._client.delete(
+            self.build_url(f"{self.settings.agent_history_path}/{offer_id}"), **kwargs
+        )

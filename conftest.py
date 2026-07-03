@@ -59,6 +59,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "permissions: validates authz / access-control boundaries",
         "data_validation: validates data integrity and correctness of returned data",
         "resilience: validates reliability under latency, retries, or partial failure",
+        "e2e: full end-to-end flow against a live deployment (may be paid/data-changing)",
     ):
         config.addinivalue_line("markers", marker)
 
@@ -180,18 +181,89 @@ def api_auth_token(
 
 
 @pytest.fixture(scope="session")
-def agent_client(settings: Settings, api_auth_token: str) -> AgentClient:
-    """Authenticated client for Captic agent endpoints (read + run helpers)."""
+def firebase_token(settings: Settings) -> str:
+    """Mint a Firebase ID token for the dedicated test account.
+
+    Captic Agent authenticates every request with a Firebase Bearer token, so any
+    authenticated agent test depends on this. Skips cleanly until FIREBASE_API_KEY
+    and the test-account credentials are configured.
+    """
+    from clients.firebase_auth import FirebaseAuthError, get_id_token
+    from config.settings import is_firebase_auth_ready
+
+    if not is_firebase_auth_ready(settings):
+        pytest.skip(
+            "Set FIREBASE_API_KEY + TEST_USER_EMAIL/PASSWORD (a real Firebase user) "
+            "to run authenticated agent tests."
+        )
+    try:
+        return get_id_token(
+            settings.firebase_api_key,
+            settings.test_user_email,
+            settings.test_user_password,
+            timeout_seconds=settings.api_timeout_seconds,
+        )
+    except FirebaseAuthError as exc:
+        pytest.skip(f"Could not obtain a Firebase token: {exc}")
+
+
+@pytest.fixture(scope="session")
+def agent_client(settings: Settings, firebase_token: str) -> AgentClient:
+    """Authenticated Captic Agent client (Firebase Bearer token)."""
     if not settings.api_base_url:
         pytest.skip("API_BASE_URL is not configured for agent tests.")
     client = AgentClient(
         settings.api_base_url,
         settings=settings,
-        auth_token=api_auth_token,
+        auth_token=firebase_token,
         timeout_seconds=settings.api_timeout_seconds,
     )
     yield client
     client.close()
+
+
+@pytest.fixture(scope="session")
+def unauth_agent_client(settings: Settings) -> AgentClient:
+    """Agent client with NO token — for verifying auth is actually enforced."""
+    if not settings.api_base_url:
+        pytest.skip("API_BASE_URL is not configured for agent tests.")
+    client = AgentClient(
+        settings.api_base_url,
+        settings=settings,
+        auth_token=None,
+        timeout_seconds=settings.api_timeout_seconds,
+    )
+    yield client
+    client.close()
+
+
+@pytest.fixture
+def sample_trade() -> dict:
+    """A realistic Oil & Gas trade payload, mirroring captic-agent test fixtures."""
+    return {
+        "offer_id": "offer-123",
+        "status": "DRAFT",
+        "trader": {"name": "Alice Trader"},
+        "counterParty": {"name": "Bob Counterparty"},
+        "allow_countering": True,
+        "products": [
+            {
+                "productName": "Gasoil",
+                "fields": [
+                    {"field": "Price", "value": "$87/MT"},
+                    {"field": "Delivery Port", "value": "Rotterdam"},
+                    {"field": "Delivery Window", "value": "December 2025"},
+                ],
+            },
+            {
+                "productName": "Diesel",
+                "fields": [
+                    {"field": "Price", "value": "$90/MT"},
+                    {"field": "Delivery Port", "value": "Singapore"},
+                ],
+            },
+        ],
+    }
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -220,7 +292,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if settings.execution_profile == "prod_safe":
             is_unit = "unit" in item.keywords
             is_prod_safe = "prod_safe" in item.keywords
-            if not is_unit and not is_prod_safe:
+            # Paid agent e2e is allowed in prod_safe ONLY when explicitly enabled —
+            # Captic is pre-launch with a single environment, so this is the
+            # intended way to run the chatbot e2e against prod. Still gated by
+            # AGENT_E2E_ENABLED and never touches a real trade (dedicated offer).
+            is_enabled_e2e = "e2e" in item.keywords and settings.agent_e2e_enabled
+            if not is_unit and not is_prod_safe and not is_enabled_e2e:
                 item.add_marker(skip_non_prod_safe)
 
         if "destructive" in item.keywords and settings.execution_profile == "prod_safe":

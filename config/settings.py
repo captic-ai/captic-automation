@@ -84,6 +84,16 @@ class Settings:
     agent_run_timeout_seconds: float = 120.0
     agent_expected_run_statuses: tuple[int, ...] = (200, 201, 202)
     api_health_strict: bool = False
+    # --- Captic Agent real contract (server.py) ---
+    firebase_api_key: str | None = None
+    agent_health_path: str = "/"
+    agent_chat_path: str = "/chat"
+    agent_models_path: str = "/models"
+    agent_history_path: str = "/history"
+    agent_test_offer_id: str = "automation-smoke-offer"
+    # Paid /chat e2e (real LLM + Firestore writes). Off by default; enable to run
+    # the data-changing chatbot tests against the pre-launch prod environment.
+    agent_e2e_enabled: bool = False
 
 
 SAFE_ENVIRONMENT_KEYWORDS = {
@@ -268,6 +278,29 @@ def is_agent_run_ready(settings: "Settings") -> bool:
     )
 
 
+def is_firebase_auth_ready(settings: "Settings") -> bool:
+    """Ready to mint a Firebase ID token for the test account."""
+    return bool(
+        settings.firebase_api_key
+        and settings.test_user_email
+        and settings.test_user_password
+    )
+
+
+def is_agent_authenticated_ready(settings: "Settings") -> bool:
+    """Ready to run read-only authenticated agent checks (models, history read)."""
+    return bool(settings.api_base_url and is_firebase_auth_ready(settings))
+
+
+def is_agent_e2e_ready(settings: "Settings") -> bool:
+    """Ready to run the paid, data-changing /chat e2e tests.
+
+    Requires an explicit opt-in (AGENT_E2E_ENABLED=true) because it spends real
+    LLM credits and writes Firestore history.
+    """
+    return bool(is_agent_authenticated_ready(settings) and settings.agent_e2e_enabled)
+
+
 @lru_cache(maxsize=1)
 def _base_settings() -> Settings:
     target_env = _read_target_env()
@@ -312,6 +345,13 @@ def _base_settings() -> Settings:
             (200, 201, 202),
         ),
         api_health_strict=_read_bool("API_HEALTH_STRICT", False),
+        firebase_api_key=os.getenv("FIREBASE_API_KEY") or None,
+        agent_health_path=_normalize_path(os.getenv("AGENT_HEALTH_PATH")) or "/",
+        agent_chat_path=_normalize_path(os.getenv("AGENT_CHAT_PATH")) or "/chat",
+        agent_models_path=_normalize_path(os.getenv("AGENT_MODELS_PATH")) or "/models",
+        agent_history_path=_normalize_path(os.getenv("AGENT_HISTORY_PATH")) or "/history",
+        agent_test_offer_id=(os.getenv("AGENT_TEST_OFFER_ID") or "automation-smoke-offer").strip(),
+        agent_e2e_enabled=_read_bool("AGENT_E2E_ENABLED", False),
     )
 
 
@@ -357,4 +397,11 @@ def get_settings(
         agent_run_timeout_seconds=base.agent_run_timeout_seconds,
         agent_expected_run_statuses=base.agent_expected_run_statuses,
         api_health_strict=base.api_health_strict,
+        firebase_api_key=base.firebase_api_key,
+        agent_health_path=base.agent_health_path,
+        agent_chat_path=base.agent_chat_path,
+        agent_models_path=base.agent_models_path,
+        agent_history_path=base.agent_history_path,
+        agent_test_offer_id=base.agent_test_offer_id,
+        agent_e2e_enabled=base.agent_e2e_enabled,
     )
