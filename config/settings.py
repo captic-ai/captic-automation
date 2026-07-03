@@ -115,7 +115,12 @@ UNSAFE_HOST_KEYWORDS = {"prod", "production", "live"}
 def _normalize_url(value: str | None) -> str | None:
     if not value:
         return None
-    return value.rstrip("/")
+    # Strip stray whitespace/newlines (common when pasting into .env or CI vars),
+    # then drop any trailing slash.
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    return cleaned.rstrip("/")
 
 
 def _normalize_path(value: str | None) -> str | None:
@@ -272,7 +277,7 @@ def _base_settings() -> Settings:
         environment=os.getenv("TEST_ENVIRONMENT", target_env),
         base_url=_normalize_url(_read_target_override(target_env, "UI_BASE_URL")),
         api_base_url=_normalize_url(_read_target_override(target_env, "API_BASE_URL")),
-        api_health_path=os.getenv("API_HEALTH_PATH", "/health"),
+        api_health_path=_normalize_path(os.getenv("API_HEALTH_PATH")) or "/health",
         api_timeout_seconds=float(os.getenv("API_TIMEOUT_SECONDS", "20")),
         viewport_width=int(os.getenv("VIEWPORT_WIDTH", "1440")),
         viewport_height=int(os.getenv("VIEWPORT_HEIGHT", "900")),
