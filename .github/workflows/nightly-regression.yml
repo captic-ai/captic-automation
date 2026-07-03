@@ -3,7 +3,8 @@ name: Nightly Regression
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 2 * * *"
+    # 22:00 Asia/Dubai (UTC+4) = 18:00 UTC. GitHub cron is always UTC.
+    - cron: "0 18 * * *"
 
 jobs:
   regression:
